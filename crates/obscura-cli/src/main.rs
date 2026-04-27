@@ -103,6 +103,11 @@ enum DumpFormat {
     Html,
     Text,
     Links,
+    /// Write the raw response body bytes to stdout (no HTML parsing/wrapping)
+    /// and a JSON envelope of {status, headers} to stderr. Use for PDFs,
+    /// images, JSON, and other non-HTML payloads. Combine with `--quiet` to
+    /// suppress the banner lines so stderr contains only the JSON envelope.
+    Body,
 }
 
 fn print_banner(port: u16) {
@@ -367,8 +372,37 @@ async fn run_fetch(
         DumpFormat::Links => {
             dump_links(&page);
         }
+        DumpFormat::Body => {
+            dump_body(&page)?;
+        }
     }
 
+    Ok(())
+}
+
+/// Write the raw response body bytes to stdout and a JSON envelope of
+/// {status, headers, url} to stderr. Used by render-proxy passthrough mode
+/// to recover non-HTML payloads (PDFs, images, JSON) that Obscura's HTML
+/// dump path would otherwise destroy by serializing through the DOM.
+fn dump_body(page: &Page) -> anyhow::Result<()> {
+    use std::io::Write as _;
+
+    let resp = page
+        .last_response
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("no response captured (navigation failed?)"))?;
+
+    let envelope = serde_json::json!({
+        "status": resp.status,
+        "url": resp.url.as_str(),
+        "headers": resp.headers,
+        "body_bytes": resp.body.len(),
+    });
+    eprintln!("{}", envelope);
+
+    let mut stdout = std::io::stdout().lock();
+    stdout.write_all(&resp.body)?;
+    stdout.flush()?;
     Ok(())
 }
 

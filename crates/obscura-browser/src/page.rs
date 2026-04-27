@@ -39,6 +39,10 @@ pub struct Page {
     pub intercept_enabled: bool,
     pub intercept_block_patterns: Vec<String>,
     intercept_tx: Option<tokio::sync::mpsc::UnboundedSender<obscura_js::ops::InterceptedRequest>>,
+    /// Most recent top-level navigation response, captured before HTML parsing.
+    /// Lets callers (e.g. CLI `--dump body`) recover the raw response body and
+    /// upstream Content-Type for non-HTML payloads (PDFs, images, JSON, etc.).
+    pub last_response: Option<Response>,
     #[cfg(feature = "stealth")]
     pub stealth_client: Option<Arc<StealthHttpClient>>,
 }
@@ -74,6 +78,7 @@ impl Page {
             intercept_enabled: false,
             intercept_block_patterns: Vec::new(),
             intercept_tx: None,
+            last_response: None,
             #[cfg(feature = "stealth")]
             stealth_client,
         }
@@ -483,6 +488,11 @@ impl Page {
         if !response.redirected_from.is_empty() {
             self.url = Some(response.url.clone());
         }
+
+        // Capture the raw response (body bytes + headers + status) before HTML
+        // parsing so callers can recover non-HTML payloads (PDFs, images, JSON).
+        // Cloned because we still need response.body for HTML parsing below.
+        self.last_response = Some(response.clone());
 
         let body_text = String::from_utf8_lossy(&response.body).to_string();
         let dom = parse_html(&body_text);
